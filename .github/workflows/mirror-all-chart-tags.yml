@@ -1,8 +1,8 @@
-name: Mirror common/* tags from GitHub.com
+name: Mirror */* tags from Bitnami
 
 on:
   schedule:
-    - cron: '0 * * * *' # hourly sync
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -27,7 +27,7 @@ jobs:
           fetch-tags: 'true'
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Fetch tags from public GitHub.com repo
+      - name: Fetch tags from public Bitnami repo
         env:
           SOURCE_REPO: https://github.com/bitnami/charts.git
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -43,14 +43,14 @@ jobs:
           echo "Pushing main branch..."
           git push https://x-access-token:${APP_TOKEN}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git refs/remotes/bitnami/main:refs/heads/main
 
-      - name: Push only common/* tags to current repository
+      - name: Push only */* tags to current repository
         env:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          TAGS=$(git tag -l 'common/*')
+          TAGS=$(git tag -l '*/*')
 
           if [ -z "$TAGS" ]; then
-            echo "No common/* tags found to push."
+            echo "No */* tags found to push."
             exit 0
           fi
 
