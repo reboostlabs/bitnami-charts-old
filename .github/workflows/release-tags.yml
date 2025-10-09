@@ -1,0 +1,95 @@
+name: Create missing releases and upload assets
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
+permissions:
+  contents: write       # allows creating releases and uploading assets
+  packages: write       # allows pushing to GitHub Container Registry
+  id-token: write       # OIDC for GHCR login
+
+jobs:
+  create_releases:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: 'true'
+
+      - name: Find tags without releases
+        id: find_missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          missing_tags=()
+          for tag in $(git tag --list); do
+            if [[ "$tag" == *"/"* ]]; then
+              if ! gh release view "$tag" &>/dev/null; then
+                missing_tags+=("$tag")
+              fi
+            fi
+          done
+          echo "missing_tags=${missing_tags[*]}" >> $GITHUB_OUTPUT
+          echo "Missing tags: ${missing_tags[*]}"
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Enable OCI
+        run: export HELM_EXPERIMENTAL_OCI=1
+
+      - name: Login to GHCR
+        run: echo ${{ secrets.GITHUB_TOKEN }} | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build zip assets for missing tags and create releases
+        if: steps.find_missing.outputs.missing_tags != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-assets
+          for tag in ${{ steps.find_missing.outputs.missing_tags }}; do
+            echo "Creating zip for $tag..."
+          
+            # Checkout tag
+            git checkout "$tag"
+
+            # Adjust this to your build folder
+            CHART_NAME="${tag%%/*}"
+            CHART_VERSION="${tag#*/}"
+            CHART_PATH="bitnami/${CHART_NAME}"
+            CHART_PACKAGE="${CHART_NAME}-${CHART_VERSION}.tgz"
+            CHART_REGISTRY=oci://ghcr.io/${{ github.repository }}
+
+            if [[ ! -f "${CHART_PATH}/Chart.yaml" ]]; then
+              echo "Skipping ${CHART_PATH}: Chart.yaml not found"
+              continue
+            fi
+
+            helm dependencies update "${CHART_PATH}"
+
+            version_already_exists=$(helm show chart ${CHART_REGISTRY}/${CHART_NAME} --version ${CHART_VERSION} || echo false)
+          
+            if [ "$version_already_exists" != "false" ]
+            then
+              echo "Chart version ${chart_version} already published. Continuing ..."
+              printf "$version_already_exists"
+            fi
+  
+            echo "Publishing new version ${chart_version}..."
+            helm package "${CHART_PATH}" --dependency-update --version ${CHART_VERSION}
+
+            echo "Uploading chart archive to ${CHART_REGISTRY}..."
+  
+            echo helm push "${CHART_PACKAGE}" "${CHART_REGISTRY}"
+            helm push "${CHART_PACKAGE}" "${CHART_REGISTRY}"
+
+            # Create the release with the zip file attached
+            gh release create "$tag" \
+              "$CHART_PACKAGE" \
+              --title "$tag" \
+              --notes "Automated release for tag $tag"
+          done
