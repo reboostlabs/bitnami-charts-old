@@ -1,5 +1,9 @@
 name: Mirror */* tags from Bitnami
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
 on:
   schedule:
     - cron: '0 * * * *'
@@ -26,6 +30,8 @@ jobs:
         with:
           fetch-tags: 'true'
           token: ${{ steps.app-token.outputs.token }}
+          ref: main
+          fetch-depth: 0
 
       - name: Fetch tags from public Bitnami repo
         env:
@@ -34,7 +40,7 @@ jobs:
         run: |
           git remote add bitnami https://x-access-token:${GITHUB_TOKEN}@${SOURCE_REPO#https://}
           git fetch bitnami main
-          git fetch --tags --prune bitnami
+          git fetch --tags bitnami
 
       - name: Push main branch to current repository
         env:
@@ -47,7 +53,10 @@ jobs:
         env:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          TAGS=$(git tag -l '*/*')
+          git ls-remote --tags bitnami '*/*'|awk '{print $2}'|sed 's/refs\/tags\///g' > /tmp/BITNAMI_TAGS.txt
+          git ls-remote --tags origin '*/*'|awk '{print $2}'|sed 's/refs\/tags\///g' > /tmp/EXISTING_TAGS.txt
+          
+          TAGS=$( grep -vxF -f /tmp/EXISTING_TAGS.txt /tmp/BITNAMI_TAGS.txt)
 
           if [ -z "$TAGS" ]; then
             echo "No */* tags found to push."

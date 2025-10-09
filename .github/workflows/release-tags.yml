@@ -1,9 +1,13 @@
 name: Create missing releases and upload assets
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 2 * * *"
+    - cron: '*/15 * * * *'
 permissions:
   contents: write       # allows creating releases and uploading assets
   packages: write       # allows pushing to GitHub Container Registry
@@ -25,13 +29,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          SUPPORTED_TAGS="common"
           missing_tags=()
           for tag in $(git tag --list); do
-            if [[ "$tag" == *"/"* ]]; then
-              if ! gh release view "$tag" &>/dev/null; then
-                missing_tags+=("$tag")
+            for prefix in $SUPPORTED_TAGS; do
+              if [[ "$tag" == "$prefix/"* ]]; then
+                if ! gh release view "$tag" &>/dev/null; then
+                  missing_tags+=("$tag")
+                fi
+                break  # no need to check other prefixes once matched
               fi
-            fi
+            done
           done
           echo "missing_tags=${missing_tags[*]}" >> $GITHUB_OUTPUT
           echo "Missing tags: ${missing_tags[*]}"
